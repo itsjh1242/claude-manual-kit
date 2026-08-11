@@ -24,9 +24,12 @@ claude-manual-kit/
    ├─ .claude-plugin/plugin.json
    └─ skills/user-manual/
       ├─ SKILL.md
-      └─ scripts/                # 캡처 엔진 (Playwright) — scripts/README.md 참고
-         ├─ capture.mjs
-         └─ specs/
+      └─ scripts/                # 캡처 → PDF 파이프라인 — scripts/README.md 참고
+         ├─ capture.mjs          # 캡처 명세 JSON → 주석 입힌 PNG (Playwright)
+         ├─ build.mjs            # 원고(.md) + PNG → PDF (Typst 0.15.x)
+         ├─ template.typ         # PDF 템플릿 (색·글꼴은 상단 cfg 만 수정)
+         ├─ specs/               # 캡처 명세 샘플
+         └─ samples/manuscript/  # 원고 샘플
 ```
 
 버전은 별도로 관리하지 않는다 — 커밋 SHA가 버전 역할을 하며, push 즉시 갱신된다.

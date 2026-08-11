@@ -27,7 +27,10 @@
   "hide": [".cookie-banner", "#dev-badge"],
   "freezeTime": "2026-03-14T09:00:00+09:00",
   "annotations": {
-    "badges": [{ "n": 1, "selector": "[data-testid=search]" }],
+    "badges": [
+      { "n": 1, "selector": "[data-testid=search]" },
+      { "n": 2, "selector": "#approve" }
+    ],
     "boxes": [{ "selector": "form.filter" }],
     "zooms": [{ "selector": "button.icon-only", "factor": 3 }]
   },

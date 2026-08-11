@@ -1,4 +1,32 @@
-# 캡처 엔진 (capture.mjs)
+# 사용 설명서 생성 스크립트
+
+코드베이스 → 주석 달린 화면 캡처 → PDF 사용 설명서. 두 단계로 나뉜다.
+
+```
+캡처 명세(.json) ──ⓐ capture.mjs──▶ 주석 입힌 PNG ─┐
+                                                     ├─ⓑ build.mjs──▶ PDF
+기능별 원고(.md) ────────────────────────────────────┘   (Typst)
+```
+
+## 요구사항
+
+```bash
+npm install
+npx playwright install chromium   # ⓐ 캡처용
+brew install typst                # ⓑ PDF 조립용 (Windows: winget install --id Typst.Typst)
+```
+
+**Typst 는 0.15.x 로 고정** (0.15.1 에서 검증). 아직 0.x 라 마이너 릴리스마다
+호환성이 깨질 수 있어, build.mjs 가 실행 시 `typst --version` 을 확인하고
+메이저/마이너가 다르면 경고한다. 미설치면 설치 명령을 안내하고 중단한다 (자동 설치 없음).
+
+Typst 를 엔진으로 고른 이유: 단일 바이너리라 시스템 라이브러리 의존이 없고
+(weasyprint 의 pango 문제 회피), 목차 페이지 번호를 네이티브로 지원한다
+(Chromium 인쇄의 한계 회피).
+
+---
+
+# ⓐ 캡처 엔진 (capture.mjs)
 
 캡처 명세 JSON 하나를 주석(뱃지·박스·확대) 오버레이가 입혀진 PNG 한 장으로 만든다.
 
@@ -9,14 +37,6 @@
 - API 응답은 `page.route` 로 인터셉트해 mock 데이터를 반환
 - 시간은 `Date` 오버라이드로 고정 (`freezeTime`)
 - 주석은 픽셀에 그리지 않고 캡처 직전 DOM 오버레이로 주입 — 좌표가 어긋날 수 없다
-
-## 설치
-
-```bash
-cd plugins/user-manual/skills/user-manual/scripts
-npm install
-npx playwright install chromium
-```
 
 ## 사용법
 
@@ -43,7 +63,7 @@ node capture.mjs --all specs/ --out captures/ --base-url http://localhost:5173
 출력 파일명은 `<out>/<spec.id>.png`. 마지막 줄에 `CAPTURE: OK` 또는
 `CAPTURE: FAIL — 사유` 를 출력하고, 실패 시 exit code 1.
 
-## 명세 스키마
+## 캡처 명세 스키마
 
 명세 하나가 캡처 한 장에 대응한다. `id` 와 `url` 만 필수, 나머지는 전부 선택.
 
@@ -106,7 +126,7 @@ node capture.mjs --all specs/ --out captures/ --base-url http://localhost:5173
 
 selector 는 Playwright selector 문법 전체를 지원한다 (`text=`, `[role=dialog]`, CSS 등).
 
-## 동작 순서
+### 캡처 동작 순서
 
 1. chromium 컨텍스트 생성 (deviceScaleFactor 2 — 레티나 화질)
 2. `addInitScript` 로 토큰 주입 + Date 고정
@@ -118,7 +138,7 @@ selector 는 Playwright selector 문법 전체를 지원한다 (`text=`, `[role=
 8. 주석 오버레이 DOM 주입
 9. screenshot (`animations: 'disabled'`)
 
-## 실패 규칙
+### 캡처 실패 규칙
 
 - **annotations / clip 의 selector 가 요소를 못 찾으면 즉시 에러로 중단한다.**
   조용히 넘어가면 뱃지가 엉뚱한 곳을 가리키고, 그 오류는 사람 눈으로만 잡힌다.
@@ -127,4 +147,128 @@ selector 는 Playwright selector 문법 전체를 지원한다 (`text=`, `[role=
 - 본문 텍스트가 거의 없으면(30자 미만) 빈 화면 의심 경고.
 - `--all` 모드에서는 실패한 명세를 스킵하고 계속 진행, 마지막에 실패 목록 보고.
 
-샘플 명세: [`specs/sample-admin-members.json`](specs/sample-admin-members.json)
+---
+
+# ⓑ PDF 조립 (build.mjs)
+
+기능별 원고(Markdown)와 캡처 PNG 를 Typst 로 변환해 PDF 를 만든다.
+문서 하나 = 독자 하나(관리자용, 사용자용 등)이고, 기능이 파일명 순서대로 나열된다.
+
+## 사용법
+
+```bash
+node build.mjs --manuscript samples/manuscript --captures captures/ \
+  --specs specs/ --out manual.pdf
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--manuscript <dir>` | 원고 디렉토리 (`doc.json` + `NN-*.md`, 파일명 순서 = 기능 번호) |
+| `--captures <dir>` | 캡처 PNG 디렉토리 (capture.mjs 출력) |
+| `--out <file.pdf>` | 출력 PDF 경로 |
+| `--specs <dir>` | 캡처 명세 디렉토리 — 뱃지 개수 대조에 사용 (권장) |
+| `--keep-typ` | 생성된 `.typ` 빌드 디렉토리를 남김 (디버그용) |
+
+마지막 줄에 `BUILD: OK` 또는 `BUILD: FAIL — 사유`. 실패 시 exit code 1.
+
+## 원고 형식
+
+**Markdown + 고정 섹션 이름 + YAML frontmatter.** 이 형식을 고른 이유:
+
+- Claude 가 자연스럽게 생성하는 형식이 마크다운이라 생성 오류율이 낮다.
+- 섹션 이름을 고정 어휘(아래 7개)로 제한하고 **모르는 섹션은 에러**로 처리하므로,
+  기계 파싱에 모호함이 없다 — 오타나 형식 이탈이 조용히 누락되는 대신 빌드가 실패한다.
+- 캡처 참조가 `![캡션](캡처id)` 하나뿐이라 명세·PNG 와의 대조 검사가 결정론적이다.
+
+디렉토리 구조 (전체 예시는 [`samples/manuscript/`](samples/manuscript/)):
+
+```
+manuscript/
+├─ doc.json        # 문서 메타: title(필수), subtitle, product, version, date, author
+├─ 01-login.md     # 파일명 사전순 = 기능 번호 (01 → 기능 1)
+├─ 02-members.md   # _ 로 시작하는 파일은 무시
+└─ 03-approve.md
+```
+
+기능 파일 하나의 구조 — frontmatter 의 `title` 만 필수, 섹션은 전부 선택:
+
+```markdown
+---
+title: 회원 목록 확인하기
+---
+
+## 이 기능은?
+한두 문장 개요. 기능 제목 바로 아래에 놓인다.
+
+## ⚠️ 주의
+되돌릴 수 없는 동작·전제 조건. 주황 "주의" 상자로 렌더링.
+("방법" 뒤에 두면 경고가 뜬다 — 위험은 절차보다 먼저 알려야 하므로)
+
+## 어디에 있나요?
+진입 경로.
+
+## 화면 구성
+![회원 관리 화면](admin-01-members)
+
+1. **회원 검색** — 이름으로 회원을 찾습니다.
+2. **신청 승인** — 가입 신청을 승인합니다.
+
+## 방법
+1. 단계별 절차. 버튼명은 **강조**.
+
+## 그러면?
+성공 시 결과. 초록 "결과" 상자로 렌더링.
+
+## 안 될 때는?
+- 실패 케이스와 안내 문구.
+```
+
+지원 문법:
+
+- `**강조**`, `` `코드` ``, 번호 목록, 글머리 목록, 문단
+- `> 인용` → 파랑 "참고" 상자
+- `![캡션](캡처id)` → 캡처 삽입. 어느 섹션이든, 몇 장이든 가능. 위치는 쓴 자리 그대로
+- `→ 기능 N 참고` → 해당 기능의 실제 페이지로 연결되는 링크 ("→ 기능 N 참고 (5쪽)")
+- 섹션 안의 하위 제목(`#`)은 금지 (에러)
+
+## 빌드 검증 (결정론적 검사)
+
+| 검사 | 결과 |
+|---|---|
+| 원고가 참조한 캡처 PNG 가 없음 | **에러** |
+| 캡처는 있는데 어느 원고도 참조 안 함 | 경고 |
+| **"화면 구성" 번호 개수 ≠ 해당 캡처 명세의 badges 개수** | **에러** — 뱃지-설명 불일치를 잡는 핵심 검사 |
+| `→ 기능 N` 의 N 이 실존하지 않음 | **에러** |
+| 알 수 없는 섹션 이름 / frontmatter 누락 | **에러** |
+| "주의"가 "방법" 뒤에 있음 | 경고 |
+| 캡처가 가로로 너무 넓어 인쇄 배율 40% 미만 | 경고 — clip 으로 좁히거나 화면 분할 권장 |
+
+## 템플릿 커스터마이징 (template.typ)
+
+색상·글꼴은 전부 `template.typ` 상단의 `cfg` 딕셔너리에 모여 있다.
+**여기만 고치면 된다:**
+
+```typst
+#let cfg = (
+  fonts: ("Apple SD Gothic Neo", "Noto Sans CJK KR", ...),  // 앞에서부터 폴백
+  font-size: 10.5pt,
+  accent: rgb("#2563eb"),   // 표지·기능 제목·상호 참조
+  badge: rgb("#ff3b30"),    // "화면 구성" 번호 원 — 캡처 뱃지 색과 맞출 것
+  note-color: ...,          // 참고 상자
+  warn-color: ...,          // 주의 상자
+  result-color: ...,        // 결과 상자
+  ...
+)
+```
+
+템플릿이 보장하는 것:
+
+- A4, 표지 / 목차(페이지 번호 자동) / 본문 / 뒷표지
+- 페이지 하단에 문서명 + 페이지 번호
+- 정보 상자 3종 (참고 / 주의 / 결과) — 색·아이콘·레이블로 구분
+- 제목·그림이 페이지 경계에서 갈라지지 않음 (sticky + breakable: false)
+- 그림은 페이지 폭 이하로만 축소 (작은 캡처는 원본 크기 유지, 확대하지 않음)
+- 기능별 자동 페이지 나눔, 목차·상호 참조는 실제 페이지로 하이퍼링크
+
+샘플 원고: [`samples/manuscript/`](samples/manuscript/) ·
+샘플 캡처 명세: [`specs/sample-admin-members.json`](specs/sample-admin-members.json)
