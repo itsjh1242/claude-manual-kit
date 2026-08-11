@@ -329,6 +329,8 @@ node validate.mjs --manuscript samples/manuscript --specs specs \
 ```
 
 **마커 대조**: 원고의 `〔확인: 항목명〕` ↔ `_질문.md` 의 `- [ ] 항목명 — 설명`.
-항목명이 정확히 일치해야 하며, 어느 한쪽에만 있으면 FAIL.
+항목명이 정확히 일치해야 한다. 마커가 있는데 `_질문.md` 에 항목이 없으면 FAIL
+(사용자가 그 질문을 받지 못한다). 항목만 있고 마커가 없는 것은 경고
+(마커 없는 질문 — 문서 제목 확인 등 — 은 정당하다).
 
 마지막 줄에 `VALIDATE: OK` 또는 `VALIDATE: FAIL — 사유`. 실패 시 exit code 1.

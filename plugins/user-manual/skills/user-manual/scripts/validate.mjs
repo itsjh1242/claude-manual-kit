@@ -155,11 +155,14 @@ function extractMarkers(text, file) {
 }
 
 function extractQuestionItems(text) {
-  // 형식: - [ ] 항목명 — 부가 설명
+  // 형식: - [ ] 항목명 — 부가 설명. 항목명의 **굵게**/`코드` 서식은 벗겨서 비교
   const items = [];
   for (const line of text.split('\n')) {
     const m = /^[-*]\s*\[[ xX]\]\s*(.+)$/.exec(line.trim());
-    if (m) items.push(m[1].split('—')[0].trim());
+    if (m) {
+      const name = m[1].split('—')[0].trim().replace(/^[*_`]+|[*_`]+$/g, '').trim();
+      if (name) items.push(name);
+    }
   }
   return items;
 }
@@ -246,9 +249,11 @@ async function main() {
         errors.push(`〔확인: ${m.name}〕 마커가 _질문.md 에 없습니다 — ${m.where}`);
       }
     }
+    // 마커 없는 질문(문서 제목 확인 등)은 정당하므로 경고만 — 반대 방향(마커가
+    // 있는데 항목이 없음)은 사용자가 그 질문을 영영 못 받으므로 에러다
     for (const q of questionItems) {
       if (!markerNames.has(q)) {
-        errors.push(`_질문.md 항목 "${q}" 에 대응하는 〔확인:〕 마커가 원고에 없습니다`);
+        warn(`_질문.md 항목 "${q}" 에 대응하는 〔확인:〕 마커가 원고에 없습니다 (마커 없는 질문이면 무시)`);
       }
     }
   }
