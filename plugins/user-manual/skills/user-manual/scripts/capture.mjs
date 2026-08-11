@@ -22,6 +22,7 @@ const HELP = `캡처 명세 JSON → 주석(뱃지·박스·확대) 오버레이
   --font <css>        주석 폰트 패밀리 (기본: 시스템 산세리프)
   --timeout <ms>      셀렉터·네트워크 대기 타임아웃 (기본: 15000)
   --headed            브라우저 창을 띄워서 실행 (디버그용)
+  --quiet             진행 줄 생략 — 경고·에러와 마지막 판정 줄만 출력
   --help              이 도움말
 
 마지막 줄에 CAPTURE: OK 또는 CAPTURE: FAIL — 사유 를 출력한다.`;
@@ -40,6 +41,7 @@ function parseArgs(argv) {
     font: "-apple-system, 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif",
     timeout: 15000,
     headed: false,
+    quiet: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -63,6 +65,7 @@ function parseArgs(argv) {
       case '--font': opts.font = next(); break;
       case '--timeout': opts.timeout = Number(next()); break;
       case '--headed': opts.headed = true; break;
+      case '--quiet': opts.quiet = true; break;
       case '--help':
       case '-h':
         console.log(HELP);
@@ -474,11 +477,11 @@ async function main() {
 
   try {
     for (const file of specFiles) {
-      console.log(`▶ ${file}`);
+      if (!opts.quiet) console.log(`▶ ${file}`);
       try {
         const { id, outPath, warnings } = await captureSpec(browser, file, opts);
         warned += warnings.length;
-        console.log(`  ✔ ${id} → ${outPath}`);
+        if (!opts.quiet) console.log(`  ✔ ${id} → ${outPath}`);
       } catch (e) {
         const msg = e instanceof SpecError ? e.message : (e?.message ?? String(e));
         console.error(`  ✘ 실패: ${msg}`);

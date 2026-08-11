@@ -24,8 +24,9 @@ const HELP = `기능별 원고(Markdown) + 캡처 PNG → PDF 사용 설명서 (
   --manuscript <dir>  원고 디렉토리 (doc.json + NN-*.md, 파일명 순서 = 기능 번호)
   --captures <dir>    캡처 PNG 디렉토리 (capture.mjs 출력)
   --out <file.pdf>    출력 PDF 경로
-  --specs <dir>       캡처 명세 디렉토리 — "화면 구성" 번호와 뱃지 개수 대조에 사용
+  --specs <dir>       캡처 명세 디렉토리 — "화면 구성" 번호와 뱃지 번호 대조에 사용
   --keep-typ          생성된 .typ 빌드 디렉토리를 지우지 않고 남김 (디버그용)
+  --quiet             진행 줄 생략 — 경고·에러와 마지막 판정 줄만 출력
   --help              이 도움말
 
 마지막 줄에 BUILD: OK 또는 BUILD: FAIL — 사유 를 출력한다.`;
@@ -33,7 +34,7 @@ const HELP = `기능별 원고(Markdown) + 캡처 PNG → PDF 사용 설명서 (
 class BuildError extends Error {}
 
 function parseArgs(argv) {
-  const opts = { manuscript: null, captures: null, out: null, specs: null, keepTyp: false };
+  const opts = { manuscript: null, captures: null, out: null, specs: null, keepTyp: false, quiet: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => {
@@ -46,6 +47,7 @@ function parseArgs(argv) {
       case '--out': opts.out = next(); break;
       case '--specs': opts.specs = next(); break;
       case '--keep-typ': opts.keepTyp = true; break;
+      case '--quiet': opts.quiet = true; break;
       case '--help':
       case '-h':
         console.log(HELP);
@@ -207,12 +209,18 @@ function parseManuscript(file, src) {
   }
 
   for (const s of sections) s.blocks = parseBlocks(s.lines, file, s.name);
-  return { file, title: meta.title, sections };
+  return { file, title: meta.title, meta, sections };
 }
+
+// 캡처 id 이름 규약: <독자>-<기능번호 2자리>-<상태> (예: admin-03-empty)
+const ID_CONVENTION = /^[a-z0-9]+-\d{2}-[a-z0-9][a-z0-9-]*$/;
 
 // ── Markdown 인라인 → Typst 마크업 ─────────────────────────────
 
-const XREF_RE = /→\s*기능\s*(\d+)(?:\s*참고)?/g;
+// 상호 참조는 id 기반: → [members]. escapeTypst 가 대괄호를 이스케이프한 뒤
+// 치환하므로 \[ \] 형태를 매칭한다. 뒤따르는 "참고"는 featref 가 렌더하므로 삼킨다.
+const XREF_RE = /→\s*\\\[([A-Za-z0-9_-]+)\\\](?:\s*참고)?/g;
+const LEGACY_XREF_RE = /→\s*기능\s*\d+/;
 
 function escapeTypst(s) {
   return s.replace(/[\\#$*_`@<>[\]~=]/g, (c) => '\\' + c);
@@ -220,9 +228,10 @@ function escapeTypst(s) {
 
 function inlineToTypst(text, ctx) {
   const xref = (s) =>
-    escapeTypst(s).replace(XREF_RE, (_, n) => {
-      ctx.xrefs.push({ n: Number(n), file: ctx.file });
-      return `#featref(${n})`;
+    escapeTypst(s).replace(XREF_RE, (m, id) => {
+      ctx.xrefs.push({ id, file: ctx.file });
+      const n = ctx.idMap.get(id);
+      return n ? `#featref(${n})` : m;
     });
   return text
     .split(/(`[^`]+`)/)
@@ -331,7 +340,12 @@ async function main() {
 
   const features = [];
   for (const f of mdFiles) {
-    features.push(parseManuscript(f, await readFile(path.join(opts.manuscript, f), 'utf8')));
+    const src = await readFile(path.join(opts.manuscript, f), 'utf8');
+    const feat = parseManuscript(f, src);
+    feat.raw = src;
+    // 기능 id: frontmatter id 우선, 없으면 파일명 NN-<id>.md 의 <id>
+    feat.id = feat.meta.id ?? (/^\d+-(.+)\.md$/.exec(f)?.[1] ?? f.replace(/\.md$/, ''));
+    features.push(feat);
   }
 
   // 캡처 명세: 뱃지 개수 대조용
@@ -340,7 +354,7 @@ async function main() {
     for (const f of (await readdir(opts.specs)).filter((f) => f.endsWith('.json'))) {
       try {
         const spec = JSON.parse(await readFile(path.join(opts.specs, f), 'utf8'));
-        if (spec.id) specBadges.set(spec.id, (spec.annotations?.badges ?? []).length);
+        if (spec.id) specBadges.set(spec.id, (spec.annotations?.badges ?? []).map((b) => b.n));
       } catch {
         warn(`명세 ${f} 를 읽을 수 없어 뱃지 검사에서 제외합니다`);
       }
@@ -352,15 +366,35 @@ async function main() {
   // ── 검증 ──
   const errors = [];
   const referenced = new Set();
+  const conventionWarned = new Set();
+
+  const idMap = new Map();
+  const idFiles = new Map();
+  for (const [i, feat] of features.entries()) {
+    if (idFiles.has(feat.id)) {
+      errors.push(`${feat.file}: 기능 id "${feat.id}" 가 ${idFiles.get(feat.id)} 와 중복됩니다 — 파일명 NN-<id>.md 의 <id> 가 겹치면 frontmatter 의 id 로 구분하세요`);
+    } else {
+      idFiles.set(feat.id, feat.file);
+      idMap.set(feat.id, i + 1);
+    }
+  }
 
   for (const [idx, feat] of features.entries()) {
     const n = idx + 1;
+
+    if (LEGACY_XREF_RE.test(feat.raw)) {
+      errors.push(`${feat.file}: "→ 기능 N" 번호 참조는 지원하지 않습니다 — id 형식 "→ [기능id]" 를 쓰세요 (예: → [members])`);
+    }
 
     for (const s of feat.sections) {
       for (const b of s.blocks) {
         if (b.type !== 'image') continue;
         b.ref = b.ref.replace(/\.png$/, '');
         referenced.add(b.ref);
+        if (!ID_CONVENTION.test(b.ref) && !conventionWarned.has(b.ref)) {
+          conventionWarned.add(b.ref);
+          warn(`캡처 id "${b.ref}" 가 이름 규약 <독자>-<기능번호 2자리>-<상태> 를 벗어납니다 (예: admin-03-empty) — 동작은 하지만 새 캡처는 규약을 따르세요`);
+        }
         try {
           await readFile(path.join(opts.captures, `${b.ref}.png`));
         } catch {
@@ -369,30 +403,44 @@ async function main() {
       }
     }
 
-    // "화면 구성" 번호 개수 = 캡처 뱃지 개수 (뱃지-설명 불일치를 잡는 결정론적 검사)
+    // "화면 구성" 검사: 섹션의 모든 캡처 명세에 나온 뱃지 n 의 합집합이
+    // 정확히 1..(항목 수)여야 한다. 뱃지-설명 불일치를 잡는 결정론적 검사.
     const screen = feat.sections.find((s) => s.key === 'screen');
     if (screen) {
       const itemCount = screen.blocks.filter((b) => b.type === 'olist')
         .reduce((sum, b) => sum + b.items.length, 0);
       const images = screen.blocks.filter((b) => b.type === 'image');
       if (images.length === 0 && itemCount > 0) {
-        warn(`${feat.file}: "화면 구성"에 캡처가 없어 뱃지 개수를 대조할 수 없습니다`);
-      } else if (specBadges.size > 0 || opts.specs) {
-        let badgeSum = 0;
+        warn(`${feat.file}: "화면 구성"에 캡처가 없어 뱃지 번호를 대조할 수 없습니다`);
+      } else if (opts.specs) {
         let checkable = images.length > 0;
+        const ns = [];
         for (const img of images) {
           if (!specBadges.has(img.ref)) {
-            if (opts.specs) warn(`${feat.file}: 캡처 "${img.ref}" 의 명세를 찾지 못해 뱃지 개수를 대조할 수 없습니다`);
+            warn(`${feat.file}: 캡처 "${img.ref}" 의 명세를 찾지 못해 뱃지 번호를 대조할 수 없습니다`);
             checkable = false;
           } else {
-            badgeSum += specBadges.get(img.ref);
+            ns.push(...specBadges.get(img.ref));
           }
         }
-        if (checkable && itemCount !== badgeSum) {
-          errors.push(
-            `${feat.file}: "화면 구성" 번호 ${itemCount}개 ≠ 캡처 뱃지 ${badgeSum}개 ` +
-            `(${images.map((i) => i.ref).join(', ')}) — 목록과 뱃지가 1:1 이어야 합니다`,
-          );
+        if (checkable) {
+          const count = new Map();
+          for (const v of ns) count.set(v, (count.get(v) ?? 0) + 1);
+          const dup = [...count].filter(([, c]) => c > 1).map(([v]) => v);
+          const outOfRange = [...new Set(ns)].filter((v) => !Number.isInteger(v) || v < 1 || v > itemCount);
+          const missing = [];
+          for (let k = 1; k <= itemCount; k++) if (!count.has(k)) missing.push(k);
+          if (dup.length || outOfRange.length || missing.length) {
+            const parts = [];
+            if (missing.length) parts.push(`누락 ${missing.join(',')}`);
+            if (dup.length) parts.push(`중복 ${dup.join(',')}`);
+            if (outOfRange.length) parts.push(`범위 밖 ${outOfRange.join(',')}`);
+            errors.push(
+              `${feat.file}: "화면 구성" 항목 ${itemCount}개 ↔ 캡처 뱃지 번호 불일치 ` +
+              `(${images.map((i) => i.ref).join(', ')}) — ${parts.join(' / ')}. ` +
+              `뱃지 n 의 합집합이 정확히 1..${itemCount} 이어야 합니다 (캡처가 여러 장이면 n 을 이어서 부여)`,
+            );
+          }
         }
       }
     }
@@ -414,6 +462,7 @@ async function main() {
   const ctx = {
     xrefs: [],
     file: null,
+    idMap,
     imageWidth: () => 100,
   };
 
@@ -441,10 +490,10 @@ async function main() {
 
   const featureTypst = features.map((feat, idx) => featureToTypst(feat, idx + 1, ctx));
 
-  // 상호 참조 검증: → 기능 N 의 N 이 실존해야 한다
+  // 상호 참조 검증: → [id] 의 id 가 실존해야 한다
   for (const x of ctx.xrefs) {
-    if (x.n < 1 || x.n > features.length) {
-      errors.push(`${x.file}: "→ 기능 ${x.n}" — 기능은 1~${features.length}번까지만 있습니다`);
+    if (!idMap.has(x.id)) {
+      errors.push(`${x.file}: "→ [${x.id}]" — 존재하지 않는 기능 id 입니다 (사용 가능: ${[...idMap.keys()].join(', ')})`);
     }
   }
 
@@ -481,7 +530,7 @@ async function main() {
   }
   if (!opts.keepTyp) await rm(buildDir, { recursive: true, force: true });
 
-  console.log(`✔ ${features.length}개 기능 → ${outAbs}`);
+  if (!opts.quiet) console.log(`✔ ${features.length}개 기능 → ${outAbs}`);
   console.log(`BUILD: OK${warnings.length ? ` (경고 ${warnings.length}건)` : ''}`);
 }
 

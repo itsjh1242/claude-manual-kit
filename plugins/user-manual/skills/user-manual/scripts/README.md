@@ -6,6 +6,7 @@
 캡처 명세(.json) ──ⓐ capture.mjs──▶ 주석 입힌 PNG ─┐
                                                      ├─ⓑ build.mjs──▶ PDF
 기능별 원고(.md) ────────────────────────────────────┘   (Typst)
+                └──────ⓒ validate.mjs — 개인정보·〔확인:〕 마커 최종 검증
 ```
 
 ## 요구사항
@@ -59,6 +60,7 @@ node capture.mjs --all specs/ --out captures/ --base-url http://localhost:5173
 | `--font <css>` | 주석 폰트 패밀리 | 시스템 산세리프 |
 | `--timeout <ms>` | 셀렉터·네트워크 대기 타임아웃 | `15000` |
 | `--headed` | 브라우저 창을 띄워서 실행 (디버그용) | off |
+| `--quiet` | 진행 줄 생략 — 경고·에러와 판정 줄만 출력 | off |
 
 출력 파일명은 `<out>/<spec.id>.png`. 마지막 줄에 `CAPTURE: OK` 또는
 `CAPTURE: FAIL — 사유` 를 출력하고, 실패 시 exit code 1.
@@ -69,7 +71,9 @@ node capture.mjs --all specs/ --out captures/ --base-url http://localhost:5173
 
 ```jsonc
 {
-  "id": "admin-01-members",          // 출력 파일명 (필수)
+  // 출력 파일명 (필수). 규약: <독자>-<기능번호 2자리>-<상태>
+  // 예: admin-03-empty, admin-03-filled. 벗어나면 build 가 경고한다
+  "id": "admin-02-filled",
   "url": "/admin/members",           // base-url 기준 상대 경로 (필수)
 
   "auth": {
@@ -100,7 +104,10 @@ node capture.mjs --all specs/ --out captures/ --base-url http://localhost:5173
   "freezeTime": "2026-03-14T09:00:00+09:00",
 
   "annotations": {
-    // 번호 원. 요소를 가리지 않는 바깥 모서리에 자동 배치
+    // 번호 원. 요소를 가리지 않는 바깥 모서리에 자동 배치.
+    // 원고의 "화면 구성" 목록과 대조: 한 섹션에 들어가는 모든 캡처의 n 합집합이
+    // 정확히 1..(항목 수)여야 한다. 캡처가 여러 장이면 n 을 이어서 부여
+    // (첫 장 1,2 / 둘째 장 3,4). 중복·누락·범위 초과는 build 에러
     "badges": [ { "n": 1, "selector": "[data-testid=search]" } ],
     // 요소 둘레 테두리
     "boxes":  [ { "selector": "form.filter" } ],
@@ -166,8 +173,9 @@ node build.mjs --manuscript samples/manuscript --captures captures/ \
 | `--manuscript <dir>` | 원고 디렉토리 (`doc.json` + `NN-*.md`, 파일명 순서 = 기능 번호) |
 | `--captures <dir>` | 캡처 PNG 디렉토리 (capture.mjs 출력) |
 | `--out <file.pdf>` | 출력 PDF 경로 |
-| `--specs <dir>` | 캡처 명세 디렉토리 — 뱃지 개수 대조에 사용 (권장) |
+| `--specs <dir>` | 캡처 명세 디렉토리 — 뱃지 번호 대조에 사용 (권장) |
 | `--keep-typ` | 생성된 `.typ` 빌드 디렉토리를 남김 (디버그용) |
+| `--quiet` | 진행 줄 생략 — 경고·에러와 판정 줄만 출력 |
 
 마지막 줄에 `BUILD: OK` 또는 `BUILD: FAIL — 사유`. 실패 시 exit code 1.
 
@@ -228,7 +236,10 @@ title: 회원 목록 확인하기
 - `**강조**`, `` `코드` ``, 번호 목록, 글머리 목록, 문단
 - `> 인용` → 파랑 "참고" 상자
 - `![캡션](캡처id)` → 캡처 삽입. 어느 섹션이든, 몇 장이든 가능. 위치는 쓴 자리 그대로
-- `→ 기능 N 참고` → 해당 기능의 실제 페이지로 연결되는 링크 ("→ 기능 N 참고 (5쪽)")
+- `→ [기능id]` → "→ 기능 N 참고 (5쪽)" 로 렌더되는 페이지 링크.
+  기능 id = 파일명 `NN-<id>.md` 의 `<id>` (frontmatter `id:` 로 재정의 가능).
+  **id 기반이므로 기능 순서를 바꿔도(파일명 번호 변경) 참조가 깨지지 않는다.**
+  구형 `→ 기능 N` 번호 참조는 에러
 - 섹션 안의 하위 제목(`#`)은 금지 (에러)
 
 ## 빌드 검증 (결정론적 검사)
@@ -237,9 +248,11 @@ title: 회원 목록 확인하기
 |---|---|
 | 원고가 참조한 캡처 PNG 가 없음 | **에러** |
 | 캡처는 있는데 어느 원고도 참조 안 함 | 경고 |
-| **"화면 구성" 번호 개수 ≠ 해당 캡처 명세의 badges 개수** | **에러** — 뱃지-설명 불일치를 잡는 핵심 검사 |
-| `→ 기능 N` 의 N 이 실존하지 않음 | **에러** |
+| **"화면 구성" 섹션의 캡처 뱃지 n 합집합 ≠ 정확히 1..(항목 수)** | **에러** — 누락/중복/범위 밖을 구분해 표시. 뱃지-설명 불일치를 잡는 핵심 검사 |
+| `→ [기능id]` 의 id 가 실존하지 않음 / 구형 `→ 기능 N` 참조 | **에러** |
+| 기능 id 중복 | **에러** — frontmatter `id:` 로 구분 |
 | 알 수 없는 섹션 이름 / frontmatter 누락 | **에러** |
+| 캡처 id 가 이름 규약 `<독자>-<기능번호 2자리>-<상태>` 를 벗어남 | 경고 |
 | "주의"가 "방법" 뒤에 있음 | 경고 |
 | 캡처가 가로로 너무 넓어 인쇄 배율 40% 미만 | 경고 — clip 으로 좁히거나 화면 분할 권장 |
 
@@ -273,3 +286,40 @@ title: 회원 목록 확인하기
 샘플 원고: [`samples/manuscript/`](samples/manuscript/) ·
 샘플 캡처 명세: [`specs/sample-admin-members.json`](specs/sample-admin-members.json) ·
 결과물 예시: [`samples/sample-manual.pdf`](samples/sample-manual.pdf)
+
+---
+
+# ⓒ 최종 검증 (validate.mjs)
+
+원고·fixture 에 실제 개인정보가 섞이지 않았는지, 〔확인:〕 마커가 `_질문.md` 와
+1:1 인지 결정론적으로 판정한다. PDF 를 내보내기 전 마지막 관문.
+
+```bash
+node validate.mjs --manuscript samples/manuscript --specs specs \
+  --captures captures --questions docs/manual/_질문.md --manual-md MANUAL.md
+```
+
+| 옵션 | 설명 |
+|---|---|
+| `--manuscript <dir>` | 원고 디렉토리 — `*.md` 본문 스캔 (여러 번 지정 가능) |
+| `--specs <dir>` | 캡처 명세 디렉토리 — fixture JSON 스캔 (여러 번 지정 가능) |
+| `--captures <dir>` | 캡처 디렉토리 — 파일명 스캔 (여러 번 지정 가능) |
+| `--questions <file>` | `_질문.md` 경로 — 마커 대조 |
+| `--manual-md <file>` | MANUAL.md 경로 — 화이트리스트 추가분 로드 |
+
+**개인정보 패턴**: 이메일, 휴대폰(010-), 일반 전화, 카드번호(4-4-4-4),
+주민등록번호(6-7) 형식. 걸리면 종류·값·파일:줄을 보고하고 FAIL.
+
+**화이트리스트**: 기본으로 example.com/org/net 도메인 이메일, `010-0000-0000`,
+`010-1234-5678`, `02-0000-0000` 을 허용. 프로젝트별 추가는 MANUAL.md 에:
+
+```markdown
+## validate-whitelist
+- 1588-0000                  <!-- 실제로 문서에 실을 대표번호 -->
+- @ourservice.com            <!-- @도메인 형태면 그 도메인 이메일 전부 허용 -->
+```
+
+**마커 대조**: 원고의 `〔확인: 항목명〕` ↔ `_질문.md` 의 `- [ ] 항목명 — 설명`.
+항목명이 정확히 일치해야 하며, 어느 한쪽에만 있으면 FAIL.
+
+마지막 줄에 `VALIDATE: OK` 또는 `VALIDATE: FAIL — 사유`. 실패 시 exit code 1.

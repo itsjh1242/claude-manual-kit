@@ -11,6 +11,7 @@ description: 코드베이스를 분석해 주석 달린 화면 캡처 기반 PDF
 도구는 이 SKILL.md 와 같은 디렉토리의 `scripts/` 에 있다 (사용법·스키마는 `scripts/README.md`):
 - `scripts/capture.mjs` — 캡처 명세 JSON → 주석(뱃지·박스·확대) 입힌 PNG
 - `scripts/build.mjs` — 원고(.md) + PNG → PDF (Typst 0.15.x 필요)
+- `scripts/validate.mjs` — 개인정보 패턴 스캔 + 〔확인:〕 마커 대조 (Phase 4)
 
 최초 실행 시 `scripts/` 에서 `npm install && npx playwright install chromium`,
 그리고 typst 설치 여부를 확인한다 (`brew install typst`).
@@ -48,7 +49,8 @@ docs/manual/
 
 프로젝트 루트의 `MANUAL.md` 를 먼저 읽는다. 거기 답이 있으면 추정하지 않고 그대로 쓴다.
 기록 대상: 서비스명, 문의처, readers(아래 「독자(문서) 결정」), 브랜드 색,
-제외할 기능, 숨길 selector(쿠키 배너 등), fixture 작성 규칙.
+제외할 기능, 숨길 selector(쿠키 배너 등), fixture 작성 규칙,
+개인정보 화이트리스트(`## validate-whitelist` 절 — 의도한 예시값을 등록).
 
 없으면 최초 실행 시 위 항목들을 빈 칸/추정값으로 채운 템플릿을 생성하고,
 추정한 값은 전부 `_질문.md` 에 남긴다.
@@ -91,7 +93,7 @@ MANUAL.md 의 readers 형식 — 독자 하나당 블록 하나:
 "이 기능은 관리자만 사용할 수 있습니다" 같은 표시를 넣는다.
 
 **여러 독자를 만들 때**: 문서마다 기능 번호는 각각 1부터 시작한다.
-상호 참조(`→ 기능 N`)도 문서 내부로 한정한다 — 다른 문서의 기능을 가리키지 않는다.
+상호 참조(`→ [기능id]`)도 문서 내부로 한정한다 — 다른 문서의 기능을 가리키지 않는다.
 기능을 독자에 배정할 때는 접근 권한을 기준으로 한다. 고객용 문서에 관리자 화면이
 섞이면 안 된다.
 
@@ -118,19 +120,23 @@ a. **코드에서 실제 문구를 읽는다** — 버튼명, 검증 규칙, 에
 b. **fixture 작성** — 그 화면에 필요한 상태(빈 목록/채워진 목록/오류 등)를
    캡처 명세의 `routes` mock 으로 만든다. 데이터는 그럴듯한 한글 예시값으로.
    이 값이 그대로 PDF에 박힌다. 실존 인물·실제 연락처를 쓰지 않는다.
-c. 캡처 명세 JSON 작성 → `node scripts/capture.mjs --spec ... --out ... --base-url ...`
+c. 캡처 명세 JSON 작성 → `node scripts/capture.mjs --spec ... --out ... --base-url ... --quiet`
+   명세 id 는 `<독자>-<기능번호 2자리>-<상태>` 로 짓는다 (예: `admin-03-empty`,
+   `admin-03-filled`). 루프에서는 항상 `--quiet` — 판정 줄과 경고만 남아 컨텍스트를 아낀다.
 d. **생성된 PNG를 Read 로 실제로 열어본다.** 확인할 것:
    - 뱃지가 의도한 요소를 가리키는가
    - 화면이 제대로 렌더됐는가 (로딩 스피너/스켈레톤 상태로 멈춰 있지 않은가)
    - `route 와 매칭되지 않은 API 호출` 경고가 있으면 fixture 에 추가하고 재촬영
 e. **원고 작성** — `scripts/README.md` 의 고정 마크다운 형식으로.
-   "화면 구성" 번호는 캡처 뱃지와 1:1 (build 가 개수를 검사한다).
+   "화면 구성" 번호는 캡처 뱃지와 1:1 (build 가 번호 합집합을 검사한다).
+   다른 기능 언급은 `→ [기능id]` 로 쓴다 (id = 파일명 `NN-<id>.md` 의 `<id>`).
 f. `_목차.md` 의 진행 상태를 갱신한다 (기능 하나 끝날 때마다).
 
 ## Phase 3 — 조립
 
-전 기능 완료 후에 일괄로 한다. 중간에 순서가 바뀌면 기능 번호·상호 참조·목차가
-전부 틀어지기 때문에, 번호 확정과 `→ 기능 N 참고` 삽입은 이 단계에서 정리한다.
+전 기능 완료 후 실행한다. 상호 참조는 id 기반(`→ [기능id]`)이라 build 가 번호와
+쪽수를 계산한다 — **기능 순서를 바꿔도 원고를 고칠 필요가 없다.** 순서 변경은
+파일명의 번호만 바꾸면 되고, 번호·목차·참조 쪽수는 build 가 알아서 맞춘다.
 
 ```
 node scripts/build.mjs --manuscript <manuscript/> --captures <captures/> \
@@ -142,13 +148,18 @@ node scripts/build.mjs --manuscript <manuscript/> --captures <captures/> \
 
 ## Phase 4 — 검증과 보고
 
-1. **개인정보 스캔**: 원고와 캡처 명세(specs)의 mock 데이터에서
-   이메일·전화번호·카드번호 패턴을 grep 한다. fixture 에 실수로 실제 값이
-   들어갈 수 있다. 걸리면 경고하고 파일:위치를 보고한다.
-2. `〔확인:` 마커를 원고 전체에서 grep → `_질문.md` 항목과 1:1 대조.
-   한쪽에만 있으면 맞춘다.
-3. **최종 보고**: PDF 경로, 독자·기능 수, `_질문.md` 요약(사용자가 답해야 할 것).
-4. **커밋하지 않는다.** 사용자가 검토 후 직접 한다.
+1. **최종 검증 스크립트**를 독자마다 실행한다:
+   ```
+   node scripts/validate.mjs --manuscript <manuscript/> --specs <specs/> \
+     --captures <captures/> --questions docs/manual/_질문.md --manual-md MANUAL.md
+   ```
+   - 개인정보 패턴(이메일·휴대폰·전화·카드·주민번호)을 원고·fixture·캡처 파일명에서
+     스캔한다. 실제 값이면 fixture 를 고치고 재촬영, 의도한 예시값이면 MANUAL.md 의
+     `## validate-whitelist` 에 추가하고 재실행.
+   - `〔확인:〕` 마커 ↔ `_질문.md` 항목 1:1 대조. 한쪽에만 있으면 맞춘다.
+   `VALIDATE: OK` 가 나올 때까지 반복한다.
+2. **최종 보고**: PDF 경로, 독자·기능 수, `_질문.md` 요약(사용자가 답해야 할 것).
+3. **커밋하지 않는다.** 사용자가 검토 후 직접 한다.
 
 ## 재개
 
