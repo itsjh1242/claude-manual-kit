@@ -23,7 +23,8 @@ claude-manual-kit/
 └─ plugins/user-manual/
    ├─ .claude-plugin/plugin.json
    └─ skills/user-manual/
-      ├─ SKILL.md
+      ├─ SKILL.md              # 전체 워크플로 (Phase 0~4)
+      ├─ references/           # Phase별 상세 — 조사·원고 작성·트러블슈팅
       └─ scripts/                # 캡처 → PDF 파이프라인 — scripts/README.md 참고
          ├─ capture.mjs          # 캡처 명세 JSON → 주석 입힌 PNG (Playwright)
          ├─ build.mjs            # 원고(.md) + PNG → PDF (Typst 0.15.x)
