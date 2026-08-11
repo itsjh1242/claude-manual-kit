@@ -271,4 +271,5 @@ title: 회원 목록 확인하기
 - 기능별 자동 페이지 나눔, 목차·상호 참조는 실제 페이지로 하이퍼링크
 
 샘플 원고: [`samples/manuscript/`](samples/manuscript/) ·
-샘플 캡처 명세: [`specs/sample-admin-members.json`](specs/sample-admin-members.json)
+샘플 캡처 명세: [`specs/sample-admin-members.json`](specs/sample-admin-members.json) ·
+결과물 예시: [`samples/sample-manual.pdf`](samples/sample-manual.pdf)
