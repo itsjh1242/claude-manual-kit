@@ -1,0 +1,15 @@
+{
+  "name": "user-manual-capture",
+  "private": true,
+  "type": "module",
+  "description": "캡처 명세 JSON 기반 화면 캡처 엔진 (Playwright)",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "capture": "node capture.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}

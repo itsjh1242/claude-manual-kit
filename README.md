@@ -22,7 +22,11 @@ claude-manual-kit/
 ├─ .claude-plugin/marketplace.json
 └─ plugins/user-manual/
    ├─ .claude-plugin/plugin.json
-   └─ skills/user-manual/SKILL.md
+   └─ skills/user-manual/
+      ├─ SKILL.md
+      └─ scripts/                # 캡처 엔진 (Playwright) — scripts/README.md 참고
+         ├─ capture.mjs
+         └─ specs/
 ```
 
 버전은 별도로 관리하지 않는다 — 커밋 SHA가 버전 역할을 하며, push 즉시 갱신된다.

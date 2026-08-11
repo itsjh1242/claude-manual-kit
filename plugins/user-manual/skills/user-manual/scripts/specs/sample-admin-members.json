@@ -1,0 +1,35 @@
+{
+  "id": "admin-01-members",
+  "url": "/admin/members",
+  "auth": {
+    "storage": { "type": "localStorage", "key": "accessToken", "value": "mock-jwt" },
+    "cookies": []
+  },
+  "routes": [
+    {
+      "pattern": "**/api/me",
+      "status": 200,
+      "body": { "id": 1, "name": "김관리", "role": "admin" }
+    },
+    {
+      "pattern": "**/api/members*",
+      "status": 200,
+      "body": [
+        { "id": 101, "name": "이신청", "status": "pending", "joinedAt": "2026-03-02" },
+        { "id": 102, "name": "박승인", "status": "approved", "joinedAt": "2026-02-11" }
+      ]
+    }
+  ],
+  "actions": [
+    { "type": "click", "selector": "text=신청 승인" },
+    { "type": "waitFor", "selector": "[role=dialog]" }
+  ],
+  "hide": [".cookie-banner", "#dev-badge"],
+  "freezeTime": "2026-03-14T09:00:00+09:00",
+  "annotations": {
+    "badges": [{ "n": 1, "selector": "[data-testid=search]" }],
+    "boxes": [{ "selector": "form.filter" }],
+    "zooms": [{ "selector": "button.icon-only", "factor": 3 }]
+  },
+  "clip": { "selector": "main" }
+}
