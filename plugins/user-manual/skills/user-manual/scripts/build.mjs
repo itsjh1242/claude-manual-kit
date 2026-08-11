@@ -12,6 +12,10 @@ const PINNED_TYPST = '0.15';
 
 // A4 (210mm) - 좌우 여백 40mm = 170mm ≈ 482pt. 캡처는 CSS 1px ≈ 0.75pt 로 환산
 const CONTENT_WIDTH_PT = 482;
+// 본문 세로는 253mm ≈ 717pt. 이미지는 분할이 안 되므로 남은 공간보다 크면 통째로
+// 다음 페이지로 밀려 반쪽 빈 페이지가 생긴다. 기능 제목 + 개요 + 진입 경로 뒤에
+// 남는 공간(약 460pt)에 들어가는 높이까지만 허용하고 넘으면 폭을 줄인다
+const MAX_IMAGE_HEIGHT_PT = 460;
 // 인쇄 배율이 이 아래로 내려가면 캡처 속 글자를 읽기 어렵다고 보고 경고
 const MIN_TEXT_SCALE = 0.4;
 
@@ -302,12 +306,12 @@ function featureToTypst(feature, n, ctx) {
 
 // ── PNG 크기 읽기 (IHDR) ───────────────────────────────────────
 
-async function pngWidth(file) {
+async function pngSize(file) {
   const buf = await readFile(file);
   if (buf.length < 24 || buf.readUInt32BE(12) !== 0x49484452) {
     throw new BuildError(`${file}: PNG 형식이 아닙니다`);
   }
-  return buf.readUInt32BE(16);
+  return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) };
 }
 
 // ── 메인 ───────────────────────────────────────────────────────
@@ -466,20 +470,31 @@ async function main() {
     imageWidth: () => 100,
   };
 
-  // 이미지 폭: CSS px(=픽셀/2, deviceScaleFactor 2) 기준으로 자연 크기 이하로만 축소
+  // 이미지 크기: CSS px(=픽셀/2, deviceScaleFactor 2) 기준으로 자연 크기 이하로만 축소.
+  // 폭은 본문 폭, 높이는 MAX_IMAGE_HEIGHT_PT 를 상한으로 한다
   const widthCache = new Map();
   for (const id of referenced) {
     const file = path.join(opts.captures, `${id}.png`);
     try {
-      const cssW = (await pngWidth(file)) / 2;
-      const naturalPt = cssW * 0.75;
-      const pct = Math.min(100, Math.round((naturalPt / CONTENT_WIDTH_PT) * 100));
-      widthCache.set(id, pct);
-      const scale = Math.min(1, CONTENT_WIDTH_PT / naturalPt);
+      const { w, h } = await pngSize(file);
+      const naturalW = (w / 2) * 0.75;
+      const naturalH = (h / 2) * 0.75;
+      let widthPt = Math.min(naturalW, CONTENT_WIDTH_PT);
+      const heightAtWidth = naturalH * (widthPt / naturalW);
+      if (heightAtWidth > MAX_IMAGE_HEIGHT_PT) {
+        widthPt *= MAX_IMAGE_HEIGHT_PT / heightAtWidth;
+        warn(
+          `캡처 ${id}.png 가 세로로 길어 페이지에 맞게 ${Math.round((widthPt / naturalW) * 100)}% 로 축소합니다 — ` +
+          `그대로 두면 이미지가 다음 페이지로 밀려 빈 페이지가 생깁니다. ` +
+          `글자가 작아지니 clip 으로 영역을 좁히거나 화면을 나눠 찍는 것을 권장`,
+        );
+      }
+      widthCache.set(id, Math.round((widthPt / CONTENT_WIDTH_PT) * 100));
+      const scale = widthPt / naturalW;
       if (scale < MIN_TEXT_SCALE) {
         warn(
-          `캡처 ${id}.png 가 가로로 너무 넓어 ${Math.round(scale * 100)}% 로 축소됩니다 — ` +
-          `글자가 안 읽힐 수 있으니 clip 으로 영역을 좁히거나 화면을 나눠 찍으세요 (하한 ${MIN_TEXT_SCALE * 100}%)`,
+          `캡처 ${id}.png 의 인쇄 배율이 ${Math.round(scale * 100)}% 로 하한(${MIN_TEXT_SCALE * 100}%)보다 낮습니다 — ` +
+          `글자가 안 읽힐 수 있으니 clip 으로 영역을 좁히거나 화면을 나눠 찍으세요`,
         );
       }
     } catch {
