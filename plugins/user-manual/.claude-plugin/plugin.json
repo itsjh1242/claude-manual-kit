@@ -1,0 +1,8 @@
+{
+  "name": "user-manual",
+  "description": "코드베이스를 분석해 주석 달린 화면 그림 기반 PDF 사용 설명서를 생성",
+  "author": {
+    "name": "itsjh1242",
+    "email": "collabo.jundev@gmail.com"
+  }
+}

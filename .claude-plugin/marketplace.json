@@ -1,0 +1,16 @@
+{
+  "name": "manual-kit",
+  "owner": {
+    "name": "itsjh1242"
+  },
+  "metadata": {
+    "description": "코드베이스에서 주석 달린 화면 그림 기반 PDF 사용 설명서를 생성하는 플러그인 마켓플레이스"
+  },
+  "plugins": [
+    {
+      "name": "user-manual",
+      "source": "./plugins/user-manual",
+      "description": "코드베이스를 분석해 주석 달린 화면 그림 기반 PDF 사용 설명서를 생성"
+    }
+  ]
+}
