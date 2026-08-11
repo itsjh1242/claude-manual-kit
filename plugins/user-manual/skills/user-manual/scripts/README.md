@@ -86,9 +86,13 @@ node capture.mjs --all specs/ --out captures/ --base-url http://localhost:5173
   // API 인터셉트. pattern 은 Playwright glob (** 는 전부, * 는 / 제외 전부).
   // 앞 항목이 우선. body 가 문자열이면 그대로, 아니면 JSON 직렬화.
   // status 기본 200, contentType 기본 application/json. headers 추가 가능.
+  // GraphQL 처럼 엔드포인트가 하나인 API 는 operationName(문자열 또는 배열)으로
+  // 갈라준다 — 요청 본문의 operationName 이 다르면 다음 route 로 넘어간다.
+  // 선언 안 된 오퍼레이션 호출은 "GraphQL <op>" 형태로 미매칭 경고에 잡힌다
   "routes": [
     { "pattern": "**/api/me", "status": 200, "body": { "id": 1, "name": "김관리" } },
-    { "pattern": "**/api/members*", "status": 200, "body": [] }
+    { "pattern": "**/graphql", "operationName": "Me", "body": { "data": { "me": {} } } },
+    { "pattern": "**/graphql", "body": { "data": null } }
   ],
 
   // 페이지 로드(networkidle) 후 순차 실행
@@ -116,7 +120,8 @@ node capture.mjs --all specs/ --out captures/ --base-url http://localhost:5173
     "zooms":  [ { "selector": "button.icon-only", "factor": 3 } ]
   },
 
-  // 이 요소의 영역만 잘라서 캡처. 주석이 영역 밖에 놓이면 합집합으로 확장됨
+  // 이 요소의 영역만 잘라서 캡처. 주석(뱃지 원·박스·확대)과 뱃지가 가리키는
+  // 대상 요소가 영역 밖에 있으면 잘리지 않도록 합집합으로 확장됨
   "clip": { "selector": "main" }
 }
 ```

@@ -237,6 +237,8 @@ async function injectOverlay(page, spec, opts, warn) {
         `line-height:${SIZE}px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.35);`;
       overlay.appendChild(d);
       annRects.push({ x: pos.x, y: pos.y, w: SIZE, h: SIZE });
+      // 뱃지가 가리키는 요소가 clip 에서 잘리면 뱃지가 무의미해지므로 합집합에 포함
+      annRects.push({ x: r.x, y: r.y, w: r.w, h: r.h });
     }
 
     for (const z of tagged.zooms) {
@@ -372,22 +374,43 @@ async function captureSpec(browser, specPath, opts) {
     page.setDefaultTimeout(opts.timeout);
 
     const routes = spec.routes ?? [];
+    // GraphQL 처럼 엔드포인트가 하나뿐인 API 는 URL 만으로 구분할 수 없으므로
+    // 요청 본문의 operationName 으로 갈라준다 (없으면 기존대로 URL 만 본다)
+    const opNameOf = (postData) => {
+      if (!postData) return null;
+      try {
+        const b = JSON.parse(postData);
+        return (Array.isArray(b) ? b[0]?.operationName : b?.operationName) ?? null;
+      } catch { return null; }
+    };
     // page.route 는 나중에 등록된 것부터 검사하므로 명세의 앞 항목이 우선하도록 역순 등록
     for (const r of [...routes].reverse()) {
-      await page.route(r.pattern, (route) => route.fulfill({
-        status: r.status ?? 200,
-        contentType: r.contentType ?? 'application/json',
-        headers: r.headers,
-        body: typeof r.body === 'string' ? r.body : JSON.stringify(r.body ?? null),
-      }));
+      await page.route(r.pattern, (route, request) => {
+        if (r.operationName) {
+          const wanted = [].concat(r.operationName);
+          if (!wanted.includes(opNameOf(request.postData()))) return route.fallback();
+        }
+        return route.fulfill({
+          status: r.status ?? 200,
+          contentType: r.contentType ?? 'application/json',
+          headers: r.headers,
+          body: typeof r.body === 'string' ? r.body : JSON.stringify(r.body ?? null),
+        });
+      });
     }
     const routeRegexes = routes.map((r) => patternToRegex(r.pattern, opts.baseUrl));
+    const declaredOps = new Set(routes.flatMap((r) => (r.operationName ? [].concat(r.operationName) : [])));
     const unmatched = new Set();
     page.on('request', (req) => {
       const rt = req.resourceType();
       if (rt !== 'xhr' && rt !== 'fetch') return;
       if (!routeRegexes.some((re) => re.test(req.url()))) {
         unmatched.add(`${req.method()} ${req.url()}`);
+        return;
+      }
+      const op = opNameOf(req.postData());
+      if (op && declaredOps.size && !declaredOps.has(op)) {
+        unmatched.add(`GraphQL ${op} (${req.url()})`);
       }
     });
 
