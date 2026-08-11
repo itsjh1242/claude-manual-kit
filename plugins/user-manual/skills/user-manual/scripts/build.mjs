@@ -407,19 +407,37 @@ async function main() {
       }
     }
 
-    // "화면 구성" 검사: 섹션의 모든 캡처 명세에 나온 뱃지 n 의 합집합이
-    // 정확히 1..(항목 수)여야 한다. 뱃지-설명 불일치를 잡는 결정론적 검사.
+    // "화면 구성" 검사: 이미지(들)와 바로 뒤에 오는 번호 목록이 한 묶음이다.
+    // 묶음마다 캡처 뱃지 n 의 합집합이 정확히 1..(그 목록의 항목 수)여야 한다.
+    // 이미지마다 목록을 새로 시작하면 각 캡처 뱃지도 1부터, 이미지 여러 장 뒤에
+    // 목록 하나면 n 을 이어 부여한 것으로 본다. 뱃지-설명 불일치를 잡는 결정론적 검사.
     const screen = feat.sections.find((s) => s.key === 'screen');
-    if (screen) {
-      const itemCount = screen.blocks.filter((b) => b.type === 'olist')
-        .reduce((sum, b) => sum + b.items.length, 0);
-      const images = screen.blocks.filter((b) => b.type === 'image');
-      if (images.length === 0 && itemCount > 0) {
-        warn(`${feat.file}: "화면 구성"에 캡처가 없어 뱃지 번호를 대조할 수 없습니다`);
-      } else if (opts.specs) {
-        let checkable = images.length > 0;
+    if (screen && opts.specs) {
+      const groups = [];
+      let cur = null;
+      for (const b of screen.blocks) {
+        if (b.type === 'image') {
+          if (!cur || cur.items > 0) {
+            cur = { images: [], items: 0 };
+            groups.push(cur);
+          }
+          cur.images.push(b);
+        } else if (b.type === 'olist') {
+          if (!cur) {
+            cur = { images: [], items: 0 };
+            groups.push(cur);
+          }
+          cur.items += b.items.length;
+        }
+      }
+      for (const g of groups) {
+        if (g.images.length === 0) {
+          if (g.items > 0) warn(`${feat.file}: "화면 구성"에 캡처 없는 번호 목록이 있어 뱃지를 대조할 수 없습니다`);
+          continue;
+        }
+        let checkable = true;
         const ns = [];
-        for (const img of images) {
+        for (const img of g.images) {
           if (!specBadges.has(img.ref)) {
             warn(`${feat.file}: 캡처 "${img.ref}" 의 명세를 찾지 못해 뱃지 번호를 대조할 수 없습니다`);
             checkable = false;
@@ -427,24 +445,32 @@ async function main() {
             ns.push(...specBadges.get(img.ref));
           }
         }
-        if (checkable) {
-          const count = new Map();
-          for (const v of ns) count.set(v, (count.get(v) ?? 0) + 1);
-          const dup = [...count].filter(([, c]) => c > 1).map(([v]) => v);
-          const outOfRange = [...new Set(ns)].filter((v) => !Number.isInteger(v) || v < 1 || v > itemCount);
-          const missing = [];
-          for (let k = 1; k <= itemCount; k++) if (!count.has(k)) missing.push(k);
-          if (dup.length || outOfRange.length || missing.length) {
-            const parts = [];
-            if (missing.length) parts.push(`누락 ${missing.join(',')}`);
-            if (dup.length) parts.push(`중복 ${dup.join(',')}`);
-            if (outOfRange.length) parts.push(`범위 밖 ${outOfRange.join(',')}`);
+        if (!checkable) continue;
+        if (g.items === 0) {
+          if (ns.length > 0) {
             errors.push(
-              `${feat.file}: "화면 구성" 항목 ${itemCount}개 ↔ 캡처 뱃지 번호 불일치 ` +
-              `(${images.map((i) => i.ref).join(', ')}) — ${parts.join(' / ')}. ` +
-              `뱃지 n 의 합집합이 정확히 1..${itemCount} 이어야 합니다 (캡처가 여러 장이면 n 을 이어서 부여)`,
+              `${feat.file}: 캡처(${g.images.map((i) => i.ref).join(', ')})에 뱃지 ${ns.length}개가 있는데 ` +
+              `뒤따르는 번호 목록이 없습니다 — 뱃지마다 설명 항목이 있어야 합니다`,
             );
           }
+          continue;
+        }
+        const count = new Map();
+        for (const v of ns) count.set(v, (count.get(v) ?? 0) + 1);
+        const dup = [...count].filter(([, c]) => c > 1).map(([v]) => v);
+        const outOfRange = [...new Set(ns)].filter((v) => !Number.isInteger(v) || v < 1 || v > g.items);
+        const missing = [];
+        for (let k = 1; k <= g.items; k++) if (!count.has(k)) missing.push(k);
+        if (dup.length || outOfRange.length || missing.length) {
+          const parts = [];
+          if (missing.length) parts.push(`누락 ${missing.join(',')}`);
+          if (dup.length) parts.push(`중복 ${dup.join(',')}`);
+          if (outOfRange.length) parts.push(`범위 밖 ${outOfRange.join(',')}`);
+          errors.push(
+            `${feat.file}: "화면 구성" 목록 ${g.items}개 항목 ↔ 캡처 뱃지 번호 불일치 ` +
+            `(${g.images.map((i) => i.ref).join(', ')}) — ${parts.join(' / ')}. ` +
+            `이미지(들)와 바로 뒤 목록이 한 묶음이며 뱃지 n 합집합이 1..${g.items} 이어야 합니다`,
+          );
         }
       }
     }
